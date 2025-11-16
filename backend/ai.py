@@ -1,9 +1,11 @@
 import sqlite3
+from dotenv import load_dotenv
+import os
 from llama_cpp import Llama
 
-# Create a SQLite database and Messages table if it doesn't exist
+load_dotenv()
 
-conn = sqlite3.connect('backend/database.db')
+conn = sqlite3.connect(os.getenv("DB_PATH"))
 cursor = conn.cursor()
 
 cursor.execute("DROP TABLE IF EXISTS Personas")
@@ -65,13 +67,13 @@ cursor.execute("""INSERT INTO Personas (name, personality, tags) VALUES (
                """)
 conn.commit()
 
-persona = 2 # Change this value to switch personas
+persona = 1
 cursor.execute("SELECT name, personality, tags FROM Personas WHERE persona_id = ?" , (persona,))
 personality = cursor.fetchone()
 
-# Load your GGUF model file
+
 llm = Llama(
-    model_path="D:/proietkoz/Models/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    model_path=os.getenv("MODEL_PATH"),
     n_ctx=2048,
     n_threads=6,
     n_gpu_layers=-1,
@@ -122,17 +124,18 @@ def summarize_conversation():
 def short_memory(history):
     short_history = ""
     for mess in history:
-        content = mess[0] if mess[2] == 0 else ""
-        role = mess[1] if mess[2] == 0 else ""
+        if mess[2] == 0:
+            content = mess[0]
+            role = mess[1]
 
-        if role == "user":
-            short_history += f"<|start_header_id|>user<|end_header_id|>\n\n{content}<|eot_id|>"
-        elif role == "assistant":
-            short_history += f"<|start_header_id|>assistant<|end_header_id|>\n\n{content}<|eot_id|>"
-    
+            if role == "user":
+                short_history += f"<|start_header_id|>user<|end_header_id|>\n\n{content}<|eot_id|>"
+            elif role == "assistant":
+                short_history += f"<|start_header_id|>assistant<|end_header_id|>\n\n{content}<|eot_id|>"
+
     return short_history
 
-# Start a new session
+
 cursor.execute("INSERT INTO Sessions DEFAULT VALUES")
 conn.commit()
 
@@ -149,25 +152,25 @@ summarized_messages = []
 while True:
     message = input("Tú: ")
 
-    # Insert a user message into the Messages table
+
     sql_command = "INSERT INTO Messages (session_id, role, content) VALUES (?, ?, ?)"
     cursor.execute(sql_command, (session_id, user_role, message))
     conn.commit()
 
-    sql_command = "SELECT content, role, is_summarized FROM Messages ORDER BY date ASC LIMIT 20"
+    sql_command = "SELECT content, role, is_summarized FROM Messages ORDER BY date DESC LIMIT 20"
 
     cursor.execute(sql_command)
     history = cursor.fetchall()
 
     formatted_history = short_memory(history)
 
-    # Check if there are 20 unsummarized messages to trigger summarization
+
     cursor.execute("SELECT COUNT(*) FROM Messages WHERE is_summarized = 0")
     unsummarized_count = cursor.fetchone()[0]
     if unsummarized_count >= 20:
         summarize_conversation()
 
-    # Retrieve the latest summary
+
     sql_command = "SELECT summary_text FROM Summaries ORDER BY date DESC LIMIT 1"
     cursor.execute(sql_command)
     summary = cursor.fetchone()
@@ -192,12 +195,12 @@ while True:
         <|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
 
     prompt = system_prompt + formatted_history + user_part
-    output = llm(prompt, max_tokens=512, temperature=0.7, echo=False)
+    output = llm(prompt, max_tokens=1024, temperature=0.7, echo=False)
     
     response = output["choices"][0]["text"].strip()
     print("\nRespuesta de la IA:\n", response)
 
-    # Insert Assistant message into the Messages table
+
     sql_command = "INSERT INTO Messages (session_id, role, content) VALUES (?, ?, ?)"
     cursor.execute(sql_command, (session_id, assistant_role, response))
     conn.commit()
